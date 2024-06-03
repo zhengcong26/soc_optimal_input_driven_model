@@ -1,122 +1,100 @@
 
-%%
-function [c,xstars] = prms_v1(pr, W, ystar, c0, xstars0) % 
-% function [c,xstars] = prms_v1(pr, W, ystar) % 
+function [c, xstars] = prms_v1(pr, W, ystar, c0, xstars0)
+% pr: struct, parameters for the problem
+% W: matrix, (NN, NN)
+% ystar: cell, target trajectories
+% c0: initial condition for c
+% xstars0: initial condition for xstars
 
-% ntrial = pr.ntrial;
 n_obs = pr.NN;
 n_mov = pr.ntrial;
 xstars_std = 0.2;
 sp = pr.x_sp;
 
-xstars0 = randn(n_obs,n_mov)*0.1/sqrt(n_mov);
-c0 = randn(2,pr.NN)*0.1/sqrt(2);
+% Initialize xstars0 and c0 if not provided
+if nargin < 4
+    xstars0 = randn(n_obs, n_mov) * 0.1 / sqrt(n_mov);
+    c0 = randn(2, pr.NN) * 0.1 / sqrt(2);
+end
 
 xstars0_i = xstars0';
-x0 = [c0;xstars0_i];
+x0 = [c0; xstars0_i];
 
-%% 
+% Calculate the parameter matrices
 I = eye(size(W));
-Q = lyap((W-I)',2*I);
-[eig_vector,eig_value] = eig(Q); % eigenvectors are arranged in columns in the matrix eig_vector
-a = fliplr(eig_vector(:,end-(n_obs-1):end)); % pick up 8 eigenvectors
+Q = lyap((W - I)', 2 * I);
+[eig_vector, ~] = eig(Q); 
+a = fliplr(eig_vector(:, end-(n_obs-1):end)); 
 
-%% Ocaml para.
+% Ocaml parameters
 n_muscles = 2;
 m1_slice = pr.NN;
 
-lambda_traj = 1/n_mov;
-lambda_reg = 1/(m1_slice*n_muscles)*0.001;
-gamma = I(1:m1_slice,:);
+lambda_traj = 1 / n_mov;
+lambda_reg = 0.001 / (m1_slice * n_muscles);
+gamma = I(1:m1_slice, :);
 
-%%
-% xstars (200*8) = top_obs (200*200) * xstars (200*8);
-% z (200*9) = [xstar + sp (200*8), sp (200*1)];
-% xstars_motor (160*9) = gamma (160*200) * z (200*9);
+% Define the cost function
+func = @(x) calculate_cost(x, pr, W, ystar, a, lambda_reg, lambda_traj, gamma, sp);
 
-%% cost function
-func = @(x) lambda_reg*norm(fun1(unpack(x)),'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 3)))-ystar{1},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 4)))-ystar{2},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 5)))-ystar{3},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 6)))-ystar{4},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 7)))-ystar{5},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 8)))-ystar{6},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 9)))-ystar{7},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 10)))-ystar{8},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 11)))-ystar{9},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 12)))-ystar{10},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 13)))-ystar{11},'fro')^2 ...
-    + lambda_traj * norm( fun1(unpack(x))*max(0,X_after(pr, W, fun2(unpack(x), 14)))-ystar{12},'fro')^2;
+% Set optimization options and run optimization
+options = optimoptions('fminunc', 'Display', 'iter', 'MaxIter', 500000, 'MaxFunEvals', 500000);
+x = fminunc(func, x0, options);
 
-    function y = fun1(x)
-        y = x(1:2,:);
-    end
-
-    function y = fun2(x, n)
-        y = transpose(x(n,:));
-    end
-
-    function xstar_c = unpack(xstar_c)
-        C = xstar_c(1:2,:);
-        x_star = transpose(xstar_c(3:end,:));
-        
-        top_obs = a;  % 观测度量的前n_obs个特征向量
-        z = n_obs*n_mov*xstars_std^2;  % 用于标准化xstars
-        
-        xstar = top_obs*x_star;
-        xstar = sqrt(z / norm(xstar)^2) * xstar; 
-%         xstar = sqrt(z / sum(sum(xstar.^2))).*xstar;   % 标准化xstars
-
-%         % nullspace
-        xstars_motor = [xstar+sp,sp];
-        xstars_motor = gamma * xstars_motor;
-        xstars_motor_t = transpose(xstars_motor);
-        h = linsolve(xstars_motor_t * xstars_motor, xstars_motor_t);
-%         h = linsolve(xstars_motor.')*xstars_motor\(xstars_motor.');
-%         disp('1')
-        C = C - C*xstars_motor*h;
-
-        xstar_c = [C;(xstar+sp)'];
-          
-    end
-
-    function X_aft = X_after(pr, W, xstar)
-        
-        h = pr.h;
-        tspan = linspace(0, pr.t_move,pr.n_move); % 20230526 constant MT
-        
-        initial_cond = xstar;
-        Xafter = integrate_dynamics2(pr, W, h, initial_cond);
-        Xafter = Xafter'; % transpose, so that the time is in the direction of the ROW vector
-        
-        X_aft = Xafter;
-        
-        % slove ODE 2
-        function X = integrate_dynamics2(pr, W, h, initial_cond)
-            [~,X] = ode45(@(t,X) rate_dynamics2_ode(t, X, pr, W, h), ...
-                tspan, initial_cond);
-        end
-        
-        % define ODE 2（after MO）
-        function x_dot = rate_dynamics2_ode(t, X, pr, W, h)
-            h_bar = pr.x_sp - W*max(0,pr.x_sp); % phi(x)=max(x,0)
-            x_dot = 1/pr.tau* ...
-                ( ...
-                -X ...
-                +W*max(0,X) ...
-                +h_bar ...
-                +interp1(tspan,h,t) ... % no u(t) after MO
-                );
-        end
-        
-    end
-
-options = optimoptions('fminunc','Display','iter','MaxIter',500000,'MaxFunEvals',500000); % 
-x = fminunc(func,x0,options);
-
-c = x(1:2,:);
-xstars = transpose(x(3:end,:));
+% Extract results
+c = x(1:2, :);
+xstars = transpose(x(3:end, :));
 
 end
 
+% Calculate the cost function
+function cost = calculate_cost(x, pr, W, ystar, a, lambda_reg, lambda_traj, gamma, sp)
+    x = unpack(x, a, pr.NN, pr.ntrial, pr.x_sp, xstars_std, gamma);
+    
+    C = x(1:2,:);
+    x_star = transpose(x);
+    
+    cost_reg = lambda_reg * norm(C, 'fro')^2;
+    cost_traj = 0;
+    
+    for i = 1:length(ystar)
+        Xafter = X_after(pr, W, x_star(:, i));        
+        cost_traj = cost_traj + lambda_traj * norm(C * max(0, Xafter) - ystar{i}, 'fro')^2;
+    end
+    
+    cost = cost_reg + cost_traj;
+end
+
+% Unpack the optimization variables
+function x = unpack(x, a, n_obs, n_mov, sp, xstars_std, gamma)
+    C = x(1:2, :);
+    x_star_raw = transpose(x(3:end, :));
+    
+    top_obs = a;
+    z = n_obs * n_mov * xstars_std^2;
+    x_star = top_obs * x_star_raw;
+    x_star = sqrt(z / norm(x_star, 'fro')^2) * x_star; 
+    
+    x_motor = [x_star + sp, sp];
+    x_motor = gamma * x_motor;
+    h = linsolve(x_motor' * x_motor, x_motor');
+    C = C - C * x_motor * h;
+    
+    x = [C;(x_star+sp)'];
+end
+
+% Calculate X_after
+function X_aft = X_after(pr, W, xstar)
+    tspan = linspace(0, pr.t_move, pr.n_move);
+    h = pr.h;
+    initial_cond = xstar;
+
+    [~, Xafter] = ode45(@(t, X) rate_dynamics2_ode(t, X, pr, W, h), tspan, initial_cond);
+    X_aft = Xafter';
+end
+
+% Define the ODE for X_after
+function x_dot = rate_dynamics2_ode(t, X, pr, W, h)
+    h_bar = pr.x_sp - W * max(0, pr.x_sp);
+    x_dot = (1 / pr.tau) * (-X + W * max(0, X) + h_bar + interp1(tspan, h, t));
+end
