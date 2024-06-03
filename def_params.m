@@ -33,9 +33,9 @@ pr.h = h_func(linspace(0,pr.t_move,pr.n_move), pr);
 
 
 % (3) Parameters of the arm mechanics and hand trajectories
-pr.L1 = 30; % unit£ºcm
+pr.L1 = 30; % unitï¼šcm
 pr.L2 = 33;
-pr.M1 = 1.4; % unit£ºkg
+pr.M1 = 1.4; % unitï¼škg
 pr.M2 = 1.0;
 pr.D2 = 16;
 pr.I1 = 0.025E4;
@@ -45,7 +45,7 @@ pr.d_reach = 20;
 pr.tau_reach = 120;
 
 % (4) Parameters of the LQR algorithm
-pr.lambda = 10;
+pr.lambda = 1;
 
 % (5) Parameters of penalization of Schimel 2023
 pr.a_effort = 5e-7;
